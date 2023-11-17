@@ -127,16 +127,25 @@ func (spec *Spec) tlsConfig() (*tls.Config, error) {
 		return nil, fmt.Errorf("none valid certs and secret")
 	}
 
+	certs := certificates
+	if spec.AutoCert {
+		certs = nil
+	}
 	// TLS-ALPN-01 challenges requires HTTP server to listen on port 443, but we don't
 	// know which HTTP server listen on this port (consider there's an nginx sitting in
 	// front of Easegress), so all HTTP servers need to handle TLS-ALPN-01 challenges.
 	// But for HTTP servers who have disabled AutoCert, it should only handle the
 	// TLS-ALPN-01 token certificate request.
 	tlsConf := &tls.Config{
-		Certificates: certificates,
+		Certificates: certs,
 		NextProtos:   []string{"acme-tls/1"},
 	}
 	tlsConf.GetCertificate = func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		for _, c := range certificates {
+			if err := chi.SupportsCertificate(&c); err == nil {
+				return &c, nil
+			}
+		}
 		return autocertmanager.GetCertificate(chi, !spec.AutoCert /* tokenOnly */)
 	}
 
