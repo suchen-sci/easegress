@@ -198,13 +198,6 @@ func HandleRequest(httpMethod string, path string, yamlBody []byte) (body []byte
 	}
 
 	msg := string(body)
-	if strings.HasPrefix(url, HTTPProtocol) && resp.StatusCode == http.StatusBadRequest && strings.Contains(strings.ToUpper(msg), "HTTPS") {
-		resp, body, err = doRequestWithBody(httpMethod, HTTPSProtocol+strings.TrimPrefix(url, HTTPProtocol), jsonBody, client)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	if !SuccessfulStatusCode(resp.StatusCode) {
 		apiErr := &APIErr{}
 		err := codectool.Unmarshal(body, apiErr)
