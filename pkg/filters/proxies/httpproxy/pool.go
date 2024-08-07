@@ -150,7 +150,7 @@ func (spCtx *serverPoolContext) prepareRequest(pool *ServerPool, svr *Server, ct
 	} else {
 		payload = req.GetPayload()
 	}
-	logger.Debugf("proxy filter send request to backend: %s %s %s %v", req.Method, req.Std().URL, url, req.Std().Header)
+	logger.Debugf("proxy filter send request to backend, method:%s, origin-url:%s, new-url:%s, headers:%v", req.Method(), req.Std().URL.String(), url, req.Std().Header)
 	stdr, err := http.NewRequestWithContext(ctx, req.Method(), url, payload)
 	if err != nil {
 		return err
