@@ -151,6 +151,9 @@ func (spCtx *serverPoolContext) prepareRequest(pool *ServerPool, svr *Server, ct
 		payload = req.GetPayload()
 	}
 	logger.Debugf("proxy filter send request to backend, method:%s, origin-url:%s, new-url:%s, headers:%v", req.Method(), req.Std().URL.String(), url, req.Std().Header)
+	if !spCtx.req.IsStream() {
+		logger.Debugf("proxy filter send request to backend, payload: %s", string(req.RawPayload()))
+	}
 	stdr, err := http.NewRequestWithContext(ctx, req.Method(), url, payload)
 	if err != nil {
 		return err
