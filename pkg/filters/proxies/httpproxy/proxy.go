@@ -26,11 +26,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptrace"
+	"net/textproto"
 	"time"
 
 	"github.com/megaease/easegress/v2/pkg/context"
 	"github.com/megaease/easegress/v2/pkg/filters"
 	"github.com/megaease/easegress/v2/pkg/filters/proxies"
+	"github.com/megaease/easegress/v2/pkg/logger"
 	"github.com/megaease/easegress/v2/pkg/protocols/httpprot"
 	"github.com/megaease/easegress/v2/pkg/resilience"
 	"github.com/megaease/easegress/v2/pkg/supervisor"
@@ -86,7 +89,147 @@ func init() {
 }
 
 var fnSendRequest = func(r *http.Request, client *http.Client) (*http.Response, error) {
-	return client.Do(r)
+	messages := []string{}
+	trace := &httptrace.ClientTrace{
+		// GetConn is called before a connection is created or
+		// retrieved from an idle pool. The hostPort is the
+		// "host:port" of the target or proxy. GetConn is called even
+		// if there's already an idle cached connection available.
+		GetConn: func(hostPort string) {
+			msg := fmt.Sprintf("GetConn: %s", hostPort)
+			messages = append(messages, msg)
+		},
+
+		// GotConn is called after a successful connection is
+		// obtained. There is no hook for failure to obtain a
+		// connection; instead, use the error from
+		// Transport.RoundTrip.
+		GotConn: func(info httptrace.GotConnInfo) {
+			msg := fmt.Sprintf("GotConn: %+v", info)
+			messages = append(messages, msg)
+		},
+
+		// PutIdleConn is called when the connection is returned to
+		// the idle pool. If err is nil, the connection was
+		// successfully returned to the idle pool. If err is non-nil,
+		// it describes why not. PutIdleConn is not called if
+		// connection reuse is disabled via Transport.DisableKeepAlives.
+		// PutIdleConn is called before the caller's Response.Body.Close
+		// call returns.
+		// For HTTP/2, this hook is not currently used.
+		PutIdleConn: func(err error) {
+			msg := fmt.Sprintf("PutIdleConn: %v", err)
+			messages = append(messages, msg)
+		},
+
+		// GotFirstResponseByte is called when the first byte of the response
+		// headers is available.
+		GotFirstResponseByte: func() {
+			msg := "GotFirstResponseByte"
+			messages = append(messages, msg)
+		},
+
+		// Got100Continue is called if the server replies with a "100
+		// Continue" response.
+		Got100Continue: func() {
+			msg := "Got100Continue"
+			messages = append(messages, msg)
+		},
+
+		// Got1xxResponse is called for each 1xx informational response header
+		// returned before the final non-1xx response. Got1xxResponse is called
+		// for "100 Continue" responses, even if Got100Continue is also defined.
+		// If it returns an error, the client request is aborted with that error value.
+		Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
+			msg := fmt.Sprintf("Got1xxResponse: %d %+v", code, header)
+			messages = append(messages, msg)
+			return nil
+		},
+
+		// DNSStart is called when a DNS lookup begins.
+		DNSStart: func(info httptrace.DNSStartInfo) {
+			msg := fmt.Sprintf("DNSStart: %+v", info)
+			messages = append(messages, msg)
+		},
+
+		// DNSDone is called when a DNS lookup ends.
+		DNSDone: func(info httptrace.DNSDoneInfo) {
+			msg := fmt.Sprintf("DNSDone: %+v", info)
+			messages = append(messages, msg)
+		},
+
+		// ConnectStart is called when a new connection's Dial begins.
+		// If net.Dialer.DualStack (IPv6 "Happy Eyeballs") support is
+		// enabled, this may be called multiple times.
+		ConnectStart: func(network, addr string) {
+			msg := fmt.Sprintf("ConnectStart: %s %s", network, addr)
+			messages = append(messages, msg)
+		},
+
+		// ConnectDone is called when a new connection's Dial
+		// completes. The provided err indicates whether the
+		// connection completed successfully.
+		// If net.Dialer.DualStack ("Happy Eyeballs") support is
+		// enabled, this may be called multiple times.
+		ConnectDone: func(network, addr string, err error) {
+			msg := fmt.Sprintf("ConnectDone: %s %s %v", network, addr, err)
+			messages = append(messages, msg)
+		},
+
+		// TLSHandshakeStart is called when the TLS handshake is started. When
+		// connecting to an HTTPS site via an HTTP proxy, the handshake happens
+		// after the CONNECT request is processed by the proxy.
+		TLSHandshakeStart: func() {
+			msg := "TLSHandshakeStart"
+			messages = append(messages, msg)
+		},
+
+		// TLSHandshakeDone is called after the TLS handshake with either the
+		// successful handshake's connection state, or a non-nil error on handshake
+		// failure.
+		TLSHandshakeDone: func(tls.ConnectionState, error) {
+			msg := "TLSHandshakeDone"
+			messages = append(messages, msg)
+		},
+
+		// WroteHeaderField is called after the Transport has written
+		// each request header. At the time of this call the values
+		// might be buffered and not yet written to the network.
+		WroteHeaderField: func(key string, value []string) {
+			msg := fmt.Sprintf("WroteHeaderField: %s %v", key, value)
+			messages = append(messages, msg)
+		},
+
+		// WroteHeaders is called after the Transport has written
+		// all request headers.
+		WroteHeaders: func() {
+			msg := "WroteHeaders"
+			messages = append(messages, msg)
+		},
+
+		// Wait100Continue is called if the Request specified
+		// "Expect: 100-continue" and the Transport has written the
+		// request headers but is waiting for "100 Continue" from the
+		// server before writing the request body.
+		Wait100Continue: func() {
+			msg := "Wait100Continue"
+			messages = append(messages, msg)
+		},
+
+		// WroteRequest is called with the result of writing the
+		// request and any body. It may be called multiple times
+		// in the case of retried requests.
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			msg := fmt.Sprintf("WroteRequest: %v", info)
+			messages = append(messages, msg)
+		},
+	}
+	clientTraceCtx := httptrace.WithClientTrace(r.Context(), trace)
+	r = r.WithContext(clientTraceCtx)
+
+	resp, err := client.Do(r)
+	logger.Debugf("client.Do, messages: %+v: %v", messages, err)
+	return resp, err
 }
 
 type (
@@ -182,6 +325,16 @@ func (s *Spec) Validate() error {
 	return nil
 }
 
+type LogTransport struct {
+	transport *http.Transport
+}
+
+func (t *LogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.transport.RoundTrip(req)
+	logger.Debugf("round trip failed, req: %+v %+v %+v, resp: %+v, err: %v", req, req.Header, req.URL.String(), resp, err)
+	return resp, err
+}
+
 func HTTPClient(tlsCfg *tls.Config, spec *HTTPClientSpec, timeout time.Duration) *http.Client {
 	dialFunc := func(ctx stdctx.Context, network, addr string) (net.Conn, error) {
 		return (&net.Dialer{
@@ -193,18 +346,20 @@ func HTTPClient(tlsCfg *tls.Config, spec *HTTPClientSpec, timeout time.Duration)
 	client := &http.Client{
 		// NOTE: Timeout could be no limit, real client or server could cancel it.
 		Timeout: timeout,
-		Transport: &http.Transport{
-			Proxy:              http.ProxyFromEnvironment,
-			DialContext:        dialFunc,
-			TLSClientConfig:    tlsCfg,
-			DisableCompression: false,
-			// NOTE: The large number of Idle Connections can
-			// reduce overhead of building connections.
-			MaxIdleConns:          spec.MaxIdleConns,
-			MaxIdleConnsPerHost:   spec.MaxIdleConnsPerHost,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
+		Transport: &LogTransport{
+			transport: &http.Transport{
+				Proxy:              http.ProxyFromEnvironment,
+				DialContext:        dialFunc,
+				TLSClientConfig:    tlsCfg,
+				DisableCompression: false,
+				// NOTE: The large number of Idle Connections can
+				// reduce overhead of building connections.
+				MaxIdleConns:          spec.MaxIdleConns,
+				MaxIdleConnsPerHost:   spec.MaxIdleConnsPerHost,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
 		},
 	}
 	if spec.MaxRedirection != nil {
