@@ -187,8 +187,8 @@ var fnSendRequest = func(r *http.Request, client *http.Client) (*http.Response, 
 		// TLSHandshakeDone is called after the TLS handshake with either the
 		// successful handshake's connection state, or a non-nil error on handshake
 		// failure.
-		TLSHandshakeDone: func(tls.ConnectionState, error) {
-			msg := "TLSHandshakeDone"
+		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
+			msg := fmt.Sprintf("TLSHandshakeDone: %+v, err: %v", state, err)
 			messages = append(messages, msg)
 		},
 
@@ -228,7 +228,13 @@ var fnSendRequest = func(r *http.Request, client *http.Client) (*http.Response, 
 	r = r.WithContext(clientTraceCtx)
 
 	resp, err := client.Do(r)
-	logger.Debugf("client.Do, messages: %+v: %v", messages, err)
+	logger.Debugf("trace url: %s", r.URL.String())
+	for _, msg := range messages {
+		logger.Debugf("trace message: %s", msg)
+	}
+	if err != nil {
+		logger.Errorf("do request failed: %v", err)
+	}
 	return resp, err
 }
 
@@ -331,7 +337,7 @@ type LogTransport struct {
 
 func (t *LogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.transport.RoundTrip(req)
-	logger.Debugf("round trip failed, req: %+v %+v %+v, resp: %+v, err: %v", req, req.Header, req.URL.String(), resp, err)
+	logger.Debugf("round trip result, req: %+v %+v %+v, resp: %+v, err: %v", req, req.Header, req.URL.String(), resp, err)
 	return resp, err
 }
 
